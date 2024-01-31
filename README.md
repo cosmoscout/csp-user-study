@@ -1,3 +1,8 @@
+<!-- 
+SPDX-FileCopyrightText: German Aerospace Center (DLR) <cosmoscout@dlr.de>
+SPDX-License-Identifier: CC-BY-4.0
+ -->
+
 # User Studies for CosmoScout VR
 
 A CosmoScout VR plugin which allows for Pre-programmed scenarios, to study 6-DoF-Movement in VR.
