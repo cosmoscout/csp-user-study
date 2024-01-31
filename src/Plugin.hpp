@@ -11,12 +11,7 @@
 #include "../../../src/cs-core/PluginBase.hpp"
 #include "../../../src/cs-core/Settings.hpp"
 #include "../../../src/cs-utils/Property.hpp"
-#include <memory>
 #include <vector>
-
-namespace cs::scene {
-class CelestialAnchor;
-} // namespace cs::scene
 
 class VistaOpenGLNode;
 class VistaTransformNode;
@@ -33,8 +28,6 @@ namespace csp::userstudy {
 /// The plugin is configurable via the application config file. See README.md for details.
 class Plugin : public cs::core::PluginBase {
  public:
-  enum class StageType { eCheckpoint, eRequestFMS, eRequestCOG, eMessage, eSwitchScenario };
-
   struct Settings {
 
     /// The settings for a scenario
@@ -51,10 +44,11 @@ class Plugin : public cs::core::PluginBase {
     std::vector<Scenario> mOtherScenarios;
 
     /// The settings for a stage of the scenario
-    struct StageSetting {
+    struct Checkpoint {
+      enum class Type { eSimple, eRequestFMS, eRequestCOG, eMessage, eSwitchScenario };
 
       /// The type of the stage
-      StageType mType{StageType::eCheckpoint};
+      Type mType{Type::eSimple};
 
       /// The related bookmark for the position & orientation
       std::string mBookmarkName;
@@ -67,7 +61,7 @@ class Plugin : public cs::core::PluginBase {
     };
 
     /// List of stages making up the scenario
-    std::vector<StageSetting> mStageSettings;
+    std::vector<Checkpoint> mCheckpoints;
 
     /// The checkpoint recording interval in seconds.
     cs::utils::DefaultProperty<uint32_t> pRecordingInterval{5};
@@ -78,28 +72,30 @@ class Plugin : public cs::core::PluginBase {
   void update() override;
 
  private:
-  void                                              onLoad();
-  void                                              unload();
-  void                                              setupStage(std::size_t stageIdx);
-  void                                              updateStages();
-  void                                              nextStage();
-  void                                              previousStage();
-  void                                              teleportToCurrent();
+  void onLoad();
+  void unload();
+
+  void showCheckpoint(std::size_t index);
+  void updateCheckpointVisibility();
+  void nextCheckpoint();
+  void previousCheckpoint();
+  void teleportToCurrent();
+
   std::optional<cs::core::Settings::Bookmark>       getBookmarkByName(std::string name);
   std::shared_ptr<const cs::scene::CelestialObject> getObjectForBookmark(
       cs::core::Settings::Bookmark const& bookmark);
 
   std::shared_ptr<Settings> mPluginSettings = std::make_shared<Settings>();
 
-  struct StageView {
+  struct CheckpointView {
     std::unique_ptr<cs::gui::WorldSpaceGuiArea> mGuiArea;
     std::unique_ptr<VistaOpenGLNode>            mGuiNode;
     std::unique_ptr<VistaTransformNode>         mTransformNode;
     std::unique_ptr<cs::gui::GuiItem>           mGuiItem;
   };
 
-  std::array<StageView, 3>              mStageViews;
-  std::size_t                           mCurrentStageIdx      = 0;
+  std::array<CheckpointView, 3>         mCheckpointViews;
+  std::size_t                           mCurrentCheckpointIdx = 0;
   bool                                  mEnableRecording      = false;
   bool                                  mEnableCOGMeasurement = false;
   std::chrono::steady_clock::time_point mLastRecordTime;

@@ -138,27 +138,27 @@ SPDX-License-Identifier: MIT
       display: none;
     }
 
-    body.stage0 {
+    body.checkpoint0 {
       opacity: 1;
       animation: flash 0.5s linear;
     }
 
-    body.stage1 {
+    body.checkpoint1 {
       opacity: 0.3;
       filter: blur(3px);
     }
 
-    body.stage2 {
+    body.checkpoint2 {
       opacity: 0.2;
       filter: blur(5px);
     }
 
-    body.stage3 {
+    body.checkpoint3 {
       opacity: 0.1;
       filter: blur(7px);
     }
 
-    body.stage4 {
+    body.checkpoint4 {
       opacity: 0.1;
       filter: blur(9px);
     }
@@ -177,7 +177,7 @@ SPDX-License-Identifier: MIT
       }
     }
 
-    body:not(.stage0)>#cp::before {
+    body:not(.checkpoint0)>#cp::before {
       position: absolute;
       width: 100%;
       height: 100%;

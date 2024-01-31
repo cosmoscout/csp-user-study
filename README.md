@@ -15,7 +15,7 @@ The plugin has been used for the following paper:
 ## Configuration
 
 This plugin can be enabled with the following configuration in your `settings.json`.
-You can leave the `stages` and `otherScenarios` arrays empty at first, they can be filled using the recording functionality of the plugin.
+You can leave the `checkpoints` and `otherScenarios` arrays empty at first, they can be filled using the recording functionality of the plugin.
 
 ```js
 {
@@ -23,7 +23,7 @@ You can leave the `stages` and `otherScenarios` arrays empty at first, they can 
   "plugins": {
     ...
     "csp-user-study": {
-      "stages": [                  // List of stages in each scenario
+      "checkpoints": [             // List of checkpoints in each scenario
         {
           "type": <string>,        // Type of a stage (enum) see below for stage types
           "bookmark": <string>,    // Name of the bookmark used for stage position
@@ -48,7 +48,7 @@ You can leave the `stages` and `otherScenarios` arrays empty at first, they can 
 
 | Type             | Description |
 |:-----------------|:------------|
-| `checkpoint`     | Draws a simple circular checkpoint which disappears when the user has moves through. |
+| `simple`         | Draws a simple circular checkpoint which disappears when the user has moves through. |
 | `requestFMS`     | Draws a checkpoint which requests a rating on the fast-motion sickness scale. |
 | `requestCOG`     | Draws a checkpoint which attempts to measure the users body sway. |
 | `message`        | Draws a checkpoint displaying the message provided in the `data` field. |

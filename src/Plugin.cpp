@@ -47,26 +47,26 @@ namespace csp::userstudy {
 // clang-format off
 
 // NOLINTNEXTLINE
-NLOHMANN_JSON_SERIALIZE_ENUM(Plugin::StageType, {
-  {Plugin::StageType::eCheckpoint, "checkpoint"},
-  {Plugin::StageType::eRequestFMS, "requestFMS"},
-  {Plugin::StageType::eRequestCOG, "requestCOG"},
-  {Plugin::StageType::eMessage, "message"},
-  {Plugin::StageType::eSwitchScenario, "switchScenario"},
+NLOHMANN_JSON_SERIALIZE_ENUM(Plugin::Settings::Checkpoint::Type, {
+  {Plugin::Settings::Checkpoint::Type::eSimple, "simple"},
+  {Plugin::Settings::Checkpoint::Type::eRequestFMS, "requestFMS"},
+  {Plugin::Settings::Checkpoint::Type::eRequestCOG, "requestCOG"},
+  {Plugin::Settings::Checkpoint::Type::eMessage, "message"},
+  {Plugin::Settings::Checkpoint::Type::eSwitchScenario, "switchScenario"},
 });
 
 // clang-format on
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void from_json(nlohmann::json const& j, Plugin::Settings::StageSetting& o) {
+void from_json(nlohmann::json const& j, Plugin::Settings::Checkpoint& o) {
   cs::core::Settings::deserialize(j, "type", o.mType);
   cs::core::Settings::deserialize(j, "bookmark", o.mBookmarkName);
   cs::core::Settings::deserialize(j, "scale", o.mScaling);
   cs::core::Settings::deserialize(j, "data", o.mData);
 }
 
-void to_json(nlohmann::json& j, Plugin::Settings::StageSetting const& o) {
+void to_json(nlohmann::json& j, Plugin::Settings::Checkpoint const& o) {
   cs::core::Settings::serialize(j, "type", o.mType);
   cs::core::Settings::serialize(j, "bookmark", o.mBookmarkName);
   cs::core::Settings::serialize(j, "scale", o.mScaling);
@@ -88,13 +88,13 @@ void to_json(nlohmann::json& j, Plugin::Settings::Scenario const& o) {
 void from_json(nlohmann::json const& j, Plugin::Settings& o) {
   cs::core::Settings::deserialize(j, "otherScenarios", o.mOtherScenarios);
   cs::core::Settings::deserialize(j, "recordingInterval", o.pRecordingInterval);
-  cs::core::Settings::deserialize(j, "stages", o.mStageSettings);
+  cs::core::Settings::deserialize(j, "checkpoints", o.mCheckpoints);
 }
 
 void to_json(nlohmann::json& j, Plugin::Settings const& o) {
   cs::core::Settings::serialize(j, "otherScenarios", o.mOtherScenarios);
   cs::core::Settings::serialize(j, "recordingInterval", o.pRecordingInterval);
-  cs::core::Settings::serialize(j, "stages", o.mStageSettings);
+  cs::core::Settings::serialize(j, "checkpoints", o.mCheckpoints);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -113,7 +113,7 @@ void Plugin::init() {
 
   mGuiManager->getGui()->registerCallback("userStudy.deleteAllCheckpoints",
       "Deletes all checkpoints and all bookmarks.", std::function([this]() {
-        mPluginSettings->mStageSettings.clear();
+        mPluginSettings->mCheckpoints.clear();
 
         bool bookmarksFound = false;
 
@@ -130,9 +130,9 @@ void Plugin::init() {
           }
         } while (bookmarksFound);
 
-        mCurrentStageIdx = 0;
+        mCurrentCheckpointIdx = 0;
 
-        updateStages();
+        updateCheckpointVisibility();
       }));
 
   mGuiManager->getGui()->registerCallback("userStudy.setRecordingInterval",
@@ -157,35 +157,35 @@ void Plugin::init() {
               "document.querySelector('.user-study-record-button').innerHTML = "
               "'<i class=\"material-icons\">fiber_manual_record</i> Start New Recording';");
 
-          for (std::size_t i = 0; i < mStageViews.size(); i++) {
-            setupStage(i);
+          for (std::size_t i = 0; i < mCheckpointViews.size(); i++) {
+            showCheckpoint(i);
           }
-          updateStages();
+          updateCheckpointVisibility();
         }
       }));
 
   mGuiManager->getGui()->registerCallback(
       "userStudy.gotoFirst", "Teleports to the first checkpoint.", std::function([this]() {
-        while (mCurrentStageIdx > 0) {
-          previousStage();
+        while (mCurrentCheckpointIdx > 0) {
+          previousCheckpoint();
         }
         teleportToCurrent();
       }));
   mGuiManager->getGui()->registerCallback(
       "userStudy.gotoPrevious", "Teleports to the previous checkpoint.", std::function([this]() {
-        previousStage();
+        previousCheckpoint();
         teleportToCurrent();
       }));
   mGuiManager->getGui()->registerCallback(
       "userStudy.gotoNext", "Teleports to the next checkpoint.", std::function([this]() {
-        nextStage();
+        nextCheckpoint();
         teleportToCurrent();
       }));
   mGuiManager->getGui()->registerCallback(
       "userStudy.gotoLast", "Teleports to the last checkpoint.", std::function([this]() {
-        if (mPluginSettings->mStageSettings.size() > 0) {
-          while (mCurrentStageIdx < mPluginSettings->mStageSettings.size() - 1) {
-            nextStage();
+        if (mPluginSettings->mCheckpoints.size() > 0) {
+          while (mCurrentCheckpointIdx < mPluginSettings->mCheckpoints.size() - 1) {
+            nextCheckpoint();
           }
         }
         teleportToCurrent();
@@ -198,7 +198,7 @@ void Plugin::init() {
     }
 
     resultsLogger().info(
-        "{}: RESET", mPluginSettings->mStageSettings[mCurrentStageIdx].mBookmarkName);
+        "{}: RESET", mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName);
 
     teleportToCurrent();
   });
@@ -211,8 +211,8 @@ void Plugin::init() {
 
     resultsLogger().info("RESTART");
 
-    while (mCurrentStageIdx > 0) {
-      previousStage();
+    while (mCurrentCheckpointIdx > 0) {
+      previousCheckpoint();
     }
     mSolarSystem->flyObserverTo(mAllSettings->mObserver.pCenter.get(),
         mAllSettings->mObserver.pFrame.get(), mAllSettings->mObserver.pPosition.get(),
@@ -229,7 +229,7 @@ void Plugin::init() {
 void Plugin::deInit() {
   logger().info("Unloading plugin...");
 
-  // remove stages
+  // remove checkpoints
   unload();
 
   mAllSettings->onLoad().disconnect(mOnLoadConnection);
@@ -256,16 +256,16 @@ void Plugin::onLoad() {
 
   unload();
 
-  mCurrentStageIdx = 0;
+  mCurrentCheckpointIdx = 0;
 
   // Read settings from JSON
   from_json(mAllSettings->mPlugins.at("csp-user-study"), *mPluginSettings);
 
-  // Get scenegraph to init stages
+  // Get scenegraph to init checkpoints
   VistaSceneGraph* pSG = GetVistaSystem()->GetGraphicsManager()->GetSceneGraph();
 
-  for (std::size_t i = 0; i < mStageViews.size(); i++) {
-    auto& view = mStageViews[i];
+  for (std::size_t i = 0; i < mCheckpointViews.size(); i++) {
+    auto& view = mCheckpointViews[i];
 
     // Create and setup gui area
     view.mGuiArea = std::make_unique<cs::gui::WorldSpaceGuiArea>(720, 720);
@@ -284,7 +284,7 @@ void Plugin::onLoad() {
 
     // Create gui item & attach it to gui area
     view.mGuiItem = std::make_unique<cs::gui::GuiItem>(
-        "file://{csp-user-study-cp}../share/resources/gui/user-study-stage.html");
+        "file://{csp-user-study-cp}../share/resources/gui/user-study-checkpoint.html");
     view.mGuiArea->addItem(view.mGuiItem.get());
     view.mGuiItem->waitForFinishedLoading();
     view.mGuiItem->setZoomFactor(2);
@@ -298,14 +298,15 @@ void Plugin::onLoad() {
     view.mGuiItem->registerCallback(
         "confirmFMS", "Call this to submit the FMS rating", std::function([this]() {
           resultsLogger().info("{}: FMS: {}",
-              mPluginSettings->mStageSettings[mCurrentStageIdx].mBookmarkName, mCurrentFMS.get());
-          nextStage();
+              mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName,
+              mCurrentFMS.get());
+          nextCheckpoint();
         }));
     view.mGuiItem->registerCallback(
-        "confirmMSG", "Call this to advance to the next stage", std::function([this]() {
+        "confirmMSG", "Call this to advance to the next checkpoint", std::function([this]() {
           resultsLogger().info(
-              "{}: MSG", mPluginSettings->mStageSettings[mCurrentStageIdx].mBookmarkName);
-          nextStage();
+              "{}: MSG", mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName);
+          nextCheckpoint();
         }));
     view.mGuiItem->registerCallback(
         "loadScenario", "Call this to load a new scenario", std::function([this](std::string path) {
@@ -317,21 +318,21 @@ void Plugin::onLoad() {
           mEnableCOGMeasurement = enable;
 
           if (!enable) {
-            nextStage();
+            nextCheckpoint();
           }
         }));
 
-    setupStage(i);
+    showCheckpoint(i);
   }
 
-  updateStages();
+  updateCheckpointVisibility();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Plugin::unload() {
   VistaSceneGraph* pSG = GetVistaSystem()->GetGraphicsManager()->GetSceneGraph();
-  for (auto& view : mStageViews) {
+  for (auto& view : mCheckpointViews) {
 
     // unregister callbacks
     if (view.mGuiItem) {
@@ -363,38 +364,6 @@ void Plugin::unload() {
 
 void Plugin::update() {
 
-  // Update the transform of the visible GUI areas according to the current reached index of stages
-  // + a window of mStageViews.size()
-  if (mPluginSettings->mStageSettings.size() > 0) {
-    for (size_t i = 0; i < mStageViews.size(); i++) {
-      // slide through the stored stages in the config
-      size_t idx_cfg  = (mCurrentStageIdx + i) % mPluginSettings->mStageSettings.size();
-      size_t idx_view = (mCurrentStageIdx + i) % mStageViews.size();
-
-      std::optional<cs::core::Settings::Bookmark> b =
-          getBookmarkByName(mPluginSettings->mStageSettings[idx_cfg].mBookmarkName);
-
-      glm::dvec3 positionOffset(0, 0, 0);
-      glm::dquat rotationOffset(1, 0, 0, 0);
-      float      scale = mPluginSettings->mStageSettings[idx_cfg].mScaling;
-
-      if (b->mLocation.has_value()) {
-        if (b->mLocation->mPosition.has_value())
-          positionOffset = b->mLocation->mPosition.value();
-        if (b->mLocation->mRotation.has_value())
-          rotationOffset = b->mLocation->mRotation.value();
-      }
-
-      auto object = getObjectForBookmark(*b);
-
-      if (object) {
-        auto transform =
-            object->getObserverRelativeTransform(positionOffset, rotationOffset, scale);
-        mStageViews[idx_view].mTransformNode->SetTransform(glm::value_ptr(transform), true);
-      }
-    }
-  }
-
   if (mEnableRecording) {
     auto now = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::seconds>(now - mLastRecordTime).count() >=
@@ -403,7 +372,7 @@ void Plugin::update() {
 
       cs::core::Settings::Bookmark bookmark;
       bookmark.mName =
-          "user-study-bookmark-" + std::to_string(mPluginSettings->mStageSettings.size());
+          "user-study-bookmark-" + std::to_string(mPluginSettings->mCheckpoints.size());
       bookmark.mLocation = {this->mSolarSystem->getObserver().getCenterName(),
           this->mSolarSystem->getObserver().getFrameName(),
           this->mSolarSystem->getObserver().getPosition(),
@@ -411,22 +380,56 @@ void Plugin::update() {
 
       mGuiManager->addBookmark(bookmark);
 
-      Settings::StageSetting stage;
-      stage.mScaling      = static_cast<float>(this->mSolarSystem->getObserver().getScale());
-      stage.mBookmarkName = bookmark.mName;
-      mPluginSettings->mStageSettings.push_back(stage);
+      Settings::Checkpoint checkpoint;
+      checkpoint.mScaling      = static_cast<float>(this->mSolarSystem->getObserver().getScale());
+      checkpoint.mBookmarkName = bookmark.mName;
+      mPluginSettings->mCheckpoints.push_back(checkpoint);
 
       logger().info("Recorded Checkpoint {}.", bookmark.mName);
     }
 
   } else {
 
-    // check if current stage is normal checkpoint
-    if (mCurrentStageIdx < mPluginSettings->mStageSettings.size() &&
-        mPluginSettings->mStageSettings[mCurrentStageIdx].mType == Plugin::StageType::eCheckpoint) {
+    // Update the transform of the visible GUI areas according to the current reached index of
+    // checkpoints
+    // + a window of mCheckpointViews.size()
+    if (mPluginSettings->mCheckpoints.size() > 0) {
+      for (size_t i = 0; i < mCheckpointViews.size(); i++) {
+        // slide through the stored checkpoints in the config
+        size_t checkpointIdx = (mCurrentCheckpointIdx + i) % mPluginSettings->mCheckpoints.size();
+        size_t viewIdx       = (mCurrentCheckpointIdx + i) % mCheckpointViews.size();
+
+        std::optional<cs::core::Settings::Bookmark> b =
+            getBookmarkByName(mPluginSettings->mCheckpoints[checkpointIdx].mBookmarkName);
+
+        glm::dvec3 positionOffset(0, 0, 0);
+        glm::dquat rotationOffset(1, 0, 0, 0);
+        float      scale = mPluginSettings->mCheckpoints[checkpointIdx].mScaling;
+
+        if (b->mLocation.has_value()) {
+          if (b->mLocation->mPosition.has_value())
+            positionOffset = b->mLocation->mPosition.value();
+          if (b->mLocation->mRotation.has_value())
+            rotationOffset = b->mLocation->mRotation.value();
+        }
+
+        auto object = getObjectForBookmark(*b);
+
+        if (object) {
+          auto transform =
+              object->getObserverRelativeTransform(positionOffset, rotationOffset, scale);
+          mCheckpointViews[viewIdx].mTransformNode->SetTransform(glm::value_ptr(transform), true);
+        }
+      }
+    }
+
+    // check if current checkpoint is normal checkpoint
+    if (mCurrentCheckpointIdx < mPluginSettings->mCheckpoints.size() &&
+        mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mType ==
+            Plugin::Settings::Checkpoint::Type::eSimple) {
       // Fetch bookmark for position
       std::optional<cs::core::Settings::Bookmark> b =
-          getBookmarkByName(mPluginSettings->mStageSettings[mCurrentStageIdx].mBookmarkName);
+          getBookmarkByName(mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName);
 
       glm::dvec3 positionOffset(0, 0, 0);
       if (b->mLocation.has_value()) {
@@ -441,10 +444,10 @@ void Plugin::update() {
         glm::dvec3 vecToObserver = object->getObserverRelativePosition(positionOffset);
 
         if (glm::length(vecToObserver) < 1.0) {
-          // go to next stage
+          // go to next checkpoint
           logger().info("{}: Passed Checkpoint",
-              mPluginSettings->mStageSettings[mCurrentStageIdx].mBookmarkName);
-          nextStage();
+              mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName);
+          nextCheckpoint();
         }
       }
     }
@@ -453,15 +456,15 @@ void Plugin::update() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void Plugin::setupStage(std::size_t stageIdx) {
-  if (stageIdx >= mPluginSettings->mStageSettings.size()) {
+void Plugin::showCheckpoint(std::size_t index) {
+  if (index >= mPluginSettings->mCheckpoints.size()) {
     return;
   }
 
-  auto const& settings = mPluginSettings->mStageSettings[stageIdx];
+  auto const& settings = mPluginSettings->mCheckpoints[index];
 
-  // Fetch stage at Index
-  auto& view = mStageViews[(stageIdx) % mStageViews.size()];
+  // Fetch checkpoint at Index
+  auto& view = mCheckpointViews[(index) % mCheckpointViews.size()];
 
   // Fetch bookmark for position
   std::optional<cs::core::Settings::Bookmark> bookmark = getBookmarkByName(settings.mBookmarkName);
@@ -470,23 +473,23 @@ void Plugin::setupStage(std::size_t stageIdx) {
 
     // Set webview according to type
     switch (settings.mType) {
-    case StageType::eCheckpoint: {
+    case Settings::Checkpoint::Type::eSimple: {
       view.mGuiItem->callJavascript("reset");
       break;
     }
-    case StageType::eRequestFMS: {
+    case Settings::Checkpoint::Type::eRequestFMS: {
       view.mGuiItem->callJavascript("setFMS");
       break;
     }
-    case StageType::eRequestCOG: {
+    case Settings::Checkpoint::Type::eRequestCOG: {
       view.mGuiItem->callJavascript("setCOG");
       break;
     }
-    case StageType::eMessage: {
+    case Settings::Checkpoint::Type::eMessage: {
       view.mGuiItem->callJavascript("setMSG", settings.mData.value_or(""));
       break;
     }
-    case StageType::eSwitchScenario: {
+    case Settings::Checkpoint::Type::eSwitchScenario: {
       std::string html = "";
       for (Plugin::Settings::Scenario& scenario : mPluginSettings->mOtherScenarios) {
         html += "<input class=\"btn\" type=\"button\" value=\"" + scenario.mName +
@@ -502,13 +505,13 @@ void Plugin::setupStage(std::size_t stageIdx) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Plugin::teleportToCurrent() {
-  size_t stageIdx = std::max(0, static_cast<int>(mCurrentStageIdx) - 1);
+  size_t index = std::max(0, static_cast<int>(mCurrentCheckpointIdx) - 1);
 
-  if (stageIdx >= mPluginSettings->mStageSettings.size()) {
+  if (index >= mPluginSettings->mCheckpoints.size()) {
     return;
   }
 
-  auto const& settings = mPluginSettings->mStageSettings[stageIdx];
+  auto const& settings = mPluginSettings->mCheckpoints[index];
   auto        bookmark = getBookmarkByName(settings.mBookmarkName);
 
   if (bookmark.has_value()) {
@@ -531,63 +534,65 @@ void Plugin::teleportToCurrent() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void Plugin::nextStage() {
-  if (mPluginSettings->mStageSettings.size() == 0) {
+void Plugin::nextCheckpoint() {
+  if (mPluginSettings->mCheckpoints.size() == 0) {
     return;
   }
 
-  // Advance the current stage index.
-  mCurrentStageIdx = std::min(mCurrentStageIdx + 1, mPluginSettings->mStageSettings.size() - 1);
+  // Advance the current checkpoint index.
+  mCurrentCheckpointIdx =
+      std::min(mCurrentCheckpointIdx + 1, mPluginSettings->mCheckpoints.size() - 1);
 
-  // Setup the stage which becomes visible next.
-  std::size_t newlyVisibleIdx = mCurrentStageIdx + mStageViews.size() - 1;
-  if (newlyVisibleIdx < mPluginSettings->mStageSettings.size()) {
-    setupStage(newlyVisibleIdx);
+  // Setup the checkpoint which becomes visible next.
+  std::size_t newlyVisibleIdx = mCurrentCheckpointIdx + mCheckpointViews.size() - 1;
+  if (newlyVisibleIdx < mPluginSettings->mCheckpoints.size()) {
+    showCheckpoint(newlyVisibleIdx);
   }
 
-  updateStages();
+  updateCheckpointVisibility();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void Plugin::previousStage() {
-  if (mPluginSettings->mStageSettings.size() == 0) {
+void Plugin::previousCheckpoint() {
+  if (mPluginSettings->mCheckpoints.size() == 0) {
     return;
   }
 
-  // Advance the current stage index.
-  mCurrentStageIdx = std::max(static_cast<int>(mCurrentStageIdx) - 1, 0);
+  // Advance the current checkpoint index.
+  mCurrentCheckpointIdx = std::max(static_cast<int>(mCurrentCheckpointIdx) - 1, 0);
 
-  // Setup the stage which becomes visible next.
-  std::size_t newlyVisibleIdx = mCurrentStageIdx;
-  if (newlyVisibleIdx < mPluginSettings->mStageSettings.size()) {
-    setupStage(newlyVisibleIdx);
+  // Setup the checkpoint which becomes visible next.
+  std::size_t newlyVisibleIdx = mCurrentCheckpointIdx;
+  if (newlyVisibleIdx < mPluginSettings->mCheckpoints.size()) {
+    showCheckpoint(newlyVisibleIdx);
   }
 
-  updateStages();
+  updateCheckpointVisibility();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void Plugin::updateStages() {
-  // Set css classes of all visible stages. The item at i==0 is the current stage, and
-  // i==mStageViews.size()-1 is the most distant stage.
-  for (std::size_t i = 0; i < mStageViews.size(); i++) {
-    auto stageIdx = (mCurrentStageIdx + i) % mStageViews.size();
-    if (mCurrentStageIdx + i < mPluginSettings->mStageSettings.size()) {
-      mStageViews[stageIdx].mGuiItem->callJavascript("setBodyClass", "stage" + std::to_string(i));
+void Plugin::updateCheckpointVisibility() {
+  // Set css classes of all visible checkpoints. The item at i==0 is the current checkpoint, and
+  // i==mCheckpointViews.size()-1 is the most distant checkpoint.
+  for (std::size_t i = 0; i < mCheckpointViews.size(); i++) {
+    auto index = (mCurrentCheckpointIdx + i) % mCheckpointViews.size();
+    if (mCurrentCheckpointIdx + i < mPluginSettings->mCheckpoints.size()) {
+      mCheckpointViews[index].mGuiItem->callJavascript(
+          "setBodyClass", "checkpoint" + std::to_string(i));
     } else {
-      mStageViews[stageIdx].mGuiItem->callJavascript("setBodyClass", "hidden");
+      mCheckpointViews[index].mGuiItem->callJavascript("setBodyClass", "hidden");
     }
 
-    // Make only current stage interactive.
-    mStageViews[stageIdx].mGuiItem->setIsInteractive(i == 0);
+    // Make only current checkpoint interactive.
+    mCheckpointViews[index].mGuiItem->setIsInteractive(i == 0);
 
     // Ensure that the checkpoints are drawn back-to-front.
-    std::size_t sortKey =
-        static_cast<std::size_t>(cs::utils::DrawOrder::eTransparentItems) + mStageViews.size() - i;
+    std::size_t sortKey = static_cast<std::size_t>(cs::utils::DrawOrder::eTransparentItems) +
+                          mCheckpointViews.size() - i;
     VistaOpenSGMaterialTools::SetSortKeyOnSubtree(
-        mStageViews[stageIdx].mGuiNode.get(), static_cast<int>(sortKey));
+        mCheckpointViews[index].mGuiNode.get(), static_cast<int>(sortKey));
   }
 }
 
