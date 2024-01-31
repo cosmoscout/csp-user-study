@@ -111,30 +111,6 @@ void Plugin::init() {
       "User Study", "people", "../share/resources/gui/user_study_settings.html");
   mGuiManager->executeJavascriptFile("../share/resources/gui/js/csp-user-study.js");
 
-  mGuiManager->getGui()->registerCallback("userStudy.deleteAllCheckpoints",
-      "Deletes all checkpoints and all bookmarks.", std::function([this]() {
-        mPluginSettings->mCheckpoints.clear();
-
-        bool bookmarksFound = false;
-
-        do {
-          bookmarksFound = false;
-
-          for (auto [id, bookmark] : mGuiManager->getBookmarks()) {
-            if (bookmark.mName.find("user-study-bookmark-") != std::string::npos) {
-              logger().info("Removing bookmark {}.", bookmark.mName);
-              mGuiManager->removeBookmark(id);
-              bookmarksFound = true;
-              break;
-            }
-          }
-        } while (bookmarksFound);
-
-        mCurrentCheckpointIdx = 0;
-
-        updateCheckpointVisibility();
-      }));
-
   mGuiManager->getGui()->registerCallback("userStudy.setRecordingInterval",
       "Sets the checkpoint recording interval in seconds.", std::function([this](double val) {
         mPluginSettings->pRecordingInterval = static_cast<uint32_t>(val);
@@ -151,7 +127,28 @@ void Plugin::init() {
           mGuiManager->getGui()->executeJavascript(
               "document.querySelector('.user-study-record-button').innerHTML = "
               "'<i class=\"material-icons\">stop</i> Stop Recording';");
+
+          mPluginSettings->mCheckpoints.clear();
+
+          bool bookmarksFound = false;
+
+          do {
+            bookmarksFound = false;
+
+            for (auto [id, bookmark] : mGuiManager->getBookmarks()) {
+              if (bookmark.mName.find("user-study-bookmark-") != std::string::npos) {
+                logger().info("Removing bookmark {}.", bookmark.mName);
+                mGuiManager->removeBookmark(id);
+                bookmarksFound = true;
+                break;
+              }
+            }
+          } while (bookmarksFound);
+
+          mCurrentCheckpointIdx = 0;
+
           mLastRecordTime = std::chrono::steady_clock::now();
+
         } else {
           mGuiManager->getGui()->executeJavascript(
               "document.querySelector('.user-study-record-button').innerHTML = "
@@ -160,8 +157,9 @@ void Plugin::init() {
           for (std::size_t i = 0; i < mCheckpointViews.size(); i++) {
             showCheckpoint(i);
           }
-          updateCheckpointVisibility();
         }
+
+        updateCheckpointVisibility();
       }));
 
   mGuiManager->getGui()->registerCallback(
@@ -237,7 +235,6 @@ void Plugin::deInit() {
 
   mGuiManager->removeSettingsSection("User Study");
   mGuiManager->getGui()->unregisterCallback("userStudy.setRecordingInterval");
-  mGuiManager->getGui()->unregisterCallback("userStudy.deleteAllCheckpoints");
   mGuiManager->getGui()->unregisterCallback("userStudy.setEnableRecording");
   mGuiManager->getGui()->unregisterCallback("userStudy.gotoFirst");
   mGuiManager->getGui()->unregisterCallback("userStudy.gotoPrevious");

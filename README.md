@@ -58,8 +58,7 @@ You can leave the `checkpoints` and `otherScenarios` arrays empty at first, they
 
 The plugin allows automatic placement of checkpoints along a given path.
 For this, you should open the plugin's tab in the advanced settings in the sidebar of CosmoScout VR.
-First, hit the **Delete All** button to remove all existing checkpoints.
-Then click **Start New Recording**.
+Just click the **Start New Recording** button.
 The plugin will now create checkpoints every few seconds.
 So you should navigate slowly along the path to record.
 Once ready, you can stop the recording again.
