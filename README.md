@@ -3,14 +3,19 @@ SPDX-FileCopyrightText: German Aerospace Center (DLR) <cosmoscout@dlr.de>
 SPDX-License-Identifier: CC-BY-4.0
  -->
 
-# User Studies for CosmoScout VR
+# User Studies Plugin for CosmoScout VR
 
-A CosmoScout VR plugin which allows for Pre-programmed scenarios, to study 6-DoF-Movement in VR.
+This CosmoScout VR plugin draws a series of checkpoints at predefined locations in space.
+The user can navigate from checkpoint to checkpoint and fulfil various tasks at each checkpoint.
+There are checkpoints for measuring the body sway of the user or checkpoints which ask the user for a cyber-sickness rating on the fast-motion sickness scale.
+The plugin has been used for the following paper:
+
+> S. Schneegans, M. Zeumer, J. Gilg, and A. Gerndt, "CosmoScout VR: A Modular 3D Solar System Based on SPICE", 2022 IEEE Aerospace Conference (AERO), 2022. https://doi.org/10.1109/AERO53065.2022.9843488
 
 ## Configuration
 
 This plugin can be enabled with the following configuration in your `settings.json`.
-The given values present a basic scenario:
+You can leave the `stages` and `otherScenarios` arrays empty at first, they can be filled using the recording functionality of the plugin.
 
 ```json
 {
@@ -18,20 +23,19 @@ The given values present a basic scenario:
   "plugins": {
     ...
     "csp-user-study": {
-      "enabled": <bool>,           // Toggle whether the scenario is visible/active
-      "debug": <bool>,             // Toggle debug mode, where all stages are visible
-      "otherScenarios": [          // List of other scenario configs related to the current scenario
-        {
-          "name": <string>,        // Name of the scenario
-          "path": <string>         // Path to the config (e.g. "../share/scenes/scenario_name.json")
-        },
-        ...
-      ],
       "stages": [                  // List of stages in each scenario
         {
           "type": <string>,        // Type of a stage (enum) see below for stage types
           "bookmark": <string>,    // Name of the bookmark used for stage position
-          "scale": <float>         // Scaling factor for the size of the web view
+          "scale": <float>,        // Scaling factor for the size of the web view
+          "data": <string>         // For now, this is only used for the message of eMessage checkpoints
+        },
+        ...
+      ],
+      "otherScenarios": [          // List of other scenario configs related to the current scenario
+        {
+          "name": <string>,        // Name of the scenario
+          "path": <string>         // Path to the config (e.g. "../share/scenes/scenario_name.json")
         },
         ...
       ]
@@ -44,6 +48,20 @@ The given values present a basic scenario:
 
 | Type             | Description |
 |:-----------------|:------------|
-| `checkpoint`     | Draws a gate the user has to move through in the correct direction. |
-| `requestFMS`     | Draws a panel to requests the user to submit a score on the FMS. |
-| `switchScenario` | Draws a panel displaying the list of `otherScenarios` allowing the user to switch to a different scenario. |
+| `checkpoint`     | Draws a simple circular checkpoint which disappears when the user has moves through. |
+| `requestFMS`     | Draws a checkpoint which requests a rating on the fast-motion sickness scale. |
+| `requestCOG`     | Draws a checkpoint which attempts to measure the users body sway. |
+| `message`        | Draws a checkpoint displaying the message provided in the `data` field. |
+| `switchScenario` | Draws a checkpoint displaying the list of `otherScenarios` allowing the user to switch to a different scenario. |
+
+## Scenario Recording
+
+The plugin allows automatic placement of checkpoints along a given path.
+For this, you should open the plugin's tab in the advanced settings in the sidebar of CosmoScout VR.
+First, hit the **Delete All** button to remove all existing checkpoints.
+Then click **Start New Recording**.
+The plugin will now create checkpoints every few seconds.
+So you should navigate slowly along the path to record.
+Once ready, you can stop the recording again.
+If you now click the **Save Scenario** button, the current scene will be saved to to a JSON file in CosmoScout's `bin` directory.
+You can edit this file and change the type of the recorded checkpoints in the configuration section of `csp-user-study`.
