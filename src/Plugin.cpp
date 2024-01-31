@@ -269,6 +269,7 @@ void Plugin::onLoad() {
 
     // Create and setup gui area
     view.mGuiArea = std::make_unique<cs::gui::WorldSpaceGuiArea>(720, 720);
+    view.mGuiArea->setEnableBackfaceCulling(false);
 
     // Create transform node
     view.mTransformNode =
