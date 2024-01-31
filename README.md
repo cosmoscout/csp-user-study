@@ -17,7 +17,7 @@ The plugin has been used for the following paper:
 This plugin can be enabled with the following configuration in your `settings.json`.
 You can leave the `stages` and `otherScenarios` arrays empty at first, they can be filled using the recording functionality of the plugin.
 
-```json
+```js
 {
   ...
   "plugins": {
