@@ -12,6 +12,17 @@ The plugin has been used for the following paper:
 
 > S. Schneegans, M. Zeumer, J. Gilg, and A. Gerndt, "CosmoScout VR: A Modular 3D Solar System Based on SPICE", 2022 IEEE Aerospace Conference (AERO), 2022. https://doi.org/10.1109/AERO53065.2022.9843488
 
+## Installation
+
+To add this plugin to CosmoScout VR, clone the repository recursively to the `plugins` directory:
+
+```bash
+cd cosmoscout-vr/plugins
+git clone https://github.com/cosmoscout/csp-user-study.git
+```
+
+CosmoScout VR will pick this up automatically, a simple `./make.sh` or `.\make.bat` as usual will build Cosmocout VR together with the plugin.
+
 ## Configuration
 
 This plugin can be enabled with the following configuration in your `settings.json`.
