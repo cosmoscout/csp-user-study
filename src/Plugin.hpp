@@ -23,8 +23,10 @@ class GuiItem;
 
 namespace csp::userstudy {
 
-/// This plugin creates configurable navigation scenarios for a user study.
-/// It uses scaleable web views to mark checkpoints with different tasks.
+/// This plugin creates configurable navigation scenarios for a user study. It uses web views to
+/// mark checkpoints with different tasks. There are different types of checkpoints: Simple
+/// checkpoints are just rings which the user needs to fly through. Other checkpoints types display
+/// messages or request user input.
 /// The plugin is configurable via the application config file. See README.md for details.
 class Plugin : public cs::core::PluginBase {
  public:
@@ -75,32 +77,59 @@ class Plugin : public cs::core::PluginBase {
   void onLoad();
   void unload();
 
-  void showCheckpoint(std::size_t index);
+  // This updates a CheckpointView according the data for the checkpoint at the given index.
+  void prepareCheckpoint(std::size_t index);
+
+  // This updates the opacity of all currently visible CheckpointViews. The view which shows the
+  // checkpoint at mCurrentCheckpointIdx will be fully visible, all others will be slightly
+  // transparent.
   void updateCheckpointVisibility();
-  void nextCheckpoint();
-  void previousCheckpoint();
+
+  // This teleports the observer to checkpoint location which has been visited last by the user.
+  // Usually, this should make the currently active checkpoint visible on screen.
   void teleportToCurrent();
 
-  std::optional<cs::core::Settings::Bookmark>       getBookmarkByName(std::string name);
+  // This advances mCurrentCheckpointIdx by one and makes the now obsolete CheckpointView show a new
+  // checkpoint which is farthest in the future.
+  void nextCheckpoint();
+
+  // This reduces mCurrentCheckpointIdx by one and makes the now obsolete CheckpointView show the
+  // checkpoint at mCurrentCheckpointIdx.
+  void previousCheckpoint();
+
+  // Retrieves the bookmark with the given name from the GuiManager. This may return std::nullopt if
+  // no bookmark with the given name exists.
+  std::optional<cs::core::Settings::Bookmark> getBookmarkByName(std::string const& name) const;
+
+  // Retrieves a CelestialObject from the SolarSystem which has the same SPICE center and frame name
+  // as the given bookmark. This can then be used to compute the observer-relative position of the
+  // bookmark. If no CelestialObject with this center and frame name exists, this will return
+  // std::nullptr.
   std::shared_ptr<const cs::scene::CelestialObject> getObjectForBookmark(
-      cs::core::Settings::Bookmark const& bookmark);
+      cs::core::Settings::Bookmark const& bookmark) const;
 
   std::shared_ptr<Settings> mPluginSettings = std::make_shared<Settings>();
 
+  // There is a fixed number of checkpoints visible at any given time (currently three). The objects
+  // below are used to draw a checkpoint. When the user passes through a checkpoint, its
+  // CheckpointView will be re-used for the next checkpoint which becomes visible.
   struct CheckpointView {
     std::unique_ptr<cs::gui::WorldSpaceGuiArea> mGuiArea;
+    std::unique_ptr<cs::gui::GuiItem>           mGuiItem;
     std::unique_ptr<VistaOpenGLNode>            mGuiNode;
     std::unique_ptr<VistaTransformNode>         mTransformNode;
-    std::unique_ptr<cs::gui::GuiItem>           mGuiItem;
   };
 
-  std::array<CheckpointView, 3>         mCheckpointViews;
-  std::size_t                           mCurrentCheckpointIdx = 0;
+  // These will show the next three checkpoints. The current checkpoint will be at index
+  // i = mCurrentCheckpointIdx % mCheckpointViews.size().
+  std::array<CheckpointView, 3> mCheckpointViews;
+  std::size_t                   mCurrentCheckpointIdx = 0;
+  cs::utils::Property<uint32_t> mCurrentFMS           = 0;
+
+  // This is set to true during checkpoint recording.
   bool                                  mEnableRecording      = false;
   bool                                  mEnableCOGMeasurement = false;
   std::chrono::steady_clock::time_point mLastRecordTime;
-
-  cs::utils::Property<uint32_t> mCurrentFMS = 0;
 
   int mOnLoadConnection = -1;
   int mOnSaveConnection = -1;

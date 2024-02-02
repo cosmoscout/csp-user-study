@@ -9,17 +9,13 @@
 #include "../../../src/cs-core/GuiManager.hpp"
 #include "../../../src/cs-core/InputManager.hpp"
 #include "../../../src/cs-core/SolarSystem.hpp"
-#include "../../../src/cs-core/TimeControl.hpp"
 #include "../../../src/cs-scene/CelestialAnchor.hpp"
 #include "logger.hpp"
 #include "resultsLogger.hpp"
 
-#include <VistaKernel/DisplayManager/VistaDisplayManager.h>
-#include <VistaKernel/DisplayManager/VistaDisplaySystem.h>
 #include <VistaKernel/GraphicsManager/VistaOpenGLNode.h>
 #include <VistaKernel/GraphicsManager/VistaSceneGraph.h>
 #include <VistaKernel/GraphicsManager/VistaTransformNode.h>
-#include <VistaKernel/InteractionManager/VistaUserPlatform.h>
 #include <VistaKernel/VistaSystem.h>
 #include <VistaKernelOpenSGExt/VistaOpenSGMaterialTools.h>
 
@@ -44,8 +40,9 @@ namespace csp::userstudy {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// clang-format off
+// Make the Plugin::Settings::Checkpoint::Type available in JSON for the plugin settings.
 
+// clang-format off
 // NOLINTNEXTLINE
 NLOHMANN_JSON_SERIALIZE_ENUM(Plugin::Settings::Checkpoint::Type, {
   {Plugin::Settings::Checkpoint::Type::eSimple, "simple"},
@@ -54,7 +51,6 @@ NLOHMANN_JSON_SERIALIZE_ENUM(Plugin::Settings::Checkpoint::Type, {
   {Plugin::Settings::Checkpoint::Type::eMessage, "message"},
   {Plugin::Settings::Checkpoint::Type::eSwitchScenario, "switchScenario"},
 });
-
 // clang-format on
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -103,14 +99,17 @@ void Plugin::init() {
 
   logger().info("Loading plugin ...");
 
+  // Deserialize and serialize the plugin's settings when the scene settings are loaded and saved.
   mOnLoadConnection = mAllSettings->onLoad().connect([this]() { onLoad(); });
   mOnSaveConnection = mAllSettings->onSave().connect(
       [this]() { mAllSettings->mPlugins["csp-user-study"] = *mPluginSettings; });
 
+  // Add the plugin's control section to the advanced settings tab of CosmoScout VR's UI.
   mGuiManager->addSettingsSectionToSideBarFromHTML(
       "User Study", "people", "../share/resources/gui/user_study_settings.html");
   mGuiManager->executeJavascriptFile("../share/resources/gui/js/csp-user-study.js");
 
+  // Add the callbacks for the recording-interval slider.
   mGuiManager->getGui()->registerCallback("userStudy.setRecordingInterval",
       "Sets the checkpoint recording interval in seconds.", std::function([this](double val) {
         mPluginSettings->pRecordingInterval = static_cast<uint32_t>(val);
@@ -118,24 +117,28 @@ void Plugin::init() {
   mPluginSettings->pRecordingInterval.connectAndTouch(
       [this](uint32_t val) { mGuiManager->setSliderValue("userStudy.setRecordingInterval", val); });
 
-  // Set the mEnableRecording value based on the corresponding checkbox.
+  // Add the functionality for the start- / stop recording button.
   mGuiManager->getGui()->registerCallback("userStudy.setEnableRecording",
       "Enables or disables frame time recording.", std::function([this](bool enable) {
         mEnableRecording = enable;
 
         if (enable) {
+
+          // Update the label of the HTML button.
           mGuiManager->getGui()->executeJavascript(
               "document.querySelector('.user-study-record-button').innerHTML = "
               "'<i class=\"material-icons\">stop</i> Stop Recording';");
 
+          // Remove all checkpoints and all corresponding bookmarks.
           mPluginSettings->mCheckpoints.clear();
+          mCurrentCheckpointIdx = 0;
 
           bool bookmarksFound = false;
 
           do {
             bookmarksFound = false;
 
-            for (auto [id, bookmark] : mGuiManager->getBookmarks()) {
+            for (auto const& [id, bookmark] : mGuiManager->getBookmarks()) {
               if (bookmark.mName.find("user-study-bookmark-") != std::string::npos) {
                 logger().info("Removing bookmark {}.", bookmark.mName);
                 mGuiManager->removeBookmark(id);
@@ -145,17 +148,19 @@ void Plugin::init() {
             }
           } while (bookmarksFound);
 
-          mCurrentCheckpointIdx = 0;
-
+          // This is used to check when a new checkpoint needs to be recorded.
           mLastRecordTime = std::chrono::steady_clock::now();
 
         } else {
+
+          // Update the label of the HTML button.
           mGuiManager->getGui()->executeJavascript(
               "document.querySelector('.user-study-record-button').innerHTML = "
               "'<i class=\"material-icons\">fiber_manual_record</i> Start New Recording';");
 
+          // Show the first n checkpoints.
           for (std::size_t i = 0; i < mCheckpointViews.size(); i++) {
-            showCheckpoint(i);
+            prepareCheckpoint(i);
           }
         }
 
@@ -319,7 +324,7 @@ void Plugin::onLoad() {
           }
         }));
 
-    showCheckpoint(i);
+    prepareCheckpoint(i);
   }
 
   updateCheckpointVisibility();
@@ -361,6 +366,8 @@ void Plugin::unload() {
 
 void Plugin::update() {
 
+  // If we are in recording-mode, we add CosmoScout bookmarks at regular intervals and store
+  // corresponding checkpoints.
   if (mEnableRecording) {
     auto now = std::chrono::steady_clock::now();
     if (std::chrono::duration_cast<std::chrono::seconds>(now - mLastRecordTime).count() >=
@@ -387,21 +394,22 @@ void Plugin::update() {
 
   } else {
 
-    // Update the transform of the visible GUI areas according to the current reached index of
-    // checkpoints
-    // + a window of mCheckpointViews.size()
+    // If we are not currently recording, we update the transformation of all visible checkpoints.
+    // As we are rendering relative to the eye, they all have to transformed into observer-centric
+    // coordinates.
     if (mPluginSettings->mCheckpoints.size() > 0) {
       for (size_t i = 0; i < mCheckpointViews.size(); i++) {
-        // slide through the stored checkpoints in the config
+
+        // Loop through the stored checkpoints in the config.
         size_t checkpointIdx = (mCurrentCheckpointIdx + i) % mPluginSettings->mCheckpoints.size();
         size_t viewIdx       = (mCurrentCheckpointIdx + i) % mCheckpointViews.size();
 
-        std::optional<cs::core::Settings::Bookmark> b =
-            getBookmarkByName(mPluginSettings->mCheckpoints[checkpointIdx].mBookmarkName);
-
+        // Retrieve the transformation information from the corresponding bookmark.
         glm::dvec3 positionOffset(0, 0, 0);
         glm::dquat rotationOffset(1, 0, 0, 0);
         float      scale = mPluginSettings->mCheckpoints[checkpointIdx].mScaling;
+
+        auto b = getBookmarkByName(mPluginSettings->mCheckpoints[checkpointIdx].mBookmarkName);
 
         if (b->mLocation.has_value()) {
           if (b->mLocation->mPosition.has_value())
@@ -410,6 +418,7 @@ void Plugin::update() {
             rotationOffset = b->mLocation->mRotation.value();
         }
 
+        // Get the observer-relative transformation and apply it to the checkpoint.
         auto object = getObjectForBookmark(*b);
 
         if (object) {
@@ -420,31 +429,30 @@ void Plugin::update() {
       }
     }
 
-    // check if current checkpoint is normal checkpoint
-    if (mCurrentCheckpointIdx < mPluginSettings->mCheckpoints.size() &&
-        mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mType ==
-            Plugin::Settings::Checkpoint::Type::eSimple) {
-      // Fetch bookmark for position
-      std::optional<cs::core::Settings::Bookmark> b =
-          getBookmarkByName(mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName);
+    // Check if we are close to the current checkpoint. If it is "Simple" checkpoint which the user
+    // only needs to pass through, we advance to the next checkpoint.
+    if (mCurrentCheckpointIdx < mPluginSettings->mCheckpoints.size()) {
+      auto checkpoint = mPluginSettings->mCheckpoints[mCurrentCheckpointIdx];
 
-      glm::dvec3 positionOffset(0, 0, 0);
-      if (b->mLocation.has_value()) {
-        if (b->mLocation->mPosition.has_value())
-          positionOffset = b->mLocation->mPosition.value();
-      }
+      if (checkpoint.mType == Plugin::Settings::Checkpoint::Type::eSimple) {
 
-      auto object = getObjectForBookmark(*b);
+        auto b = getBookmarkByName(checkpoint.mBookmarkName);
 
-      if (object) {
+        glm::dvec3 positionOffset(0, 0, 0);
+        if (b->mLocation.has_value()) {
+          if (b->mLocation->mPosition.has_value())
+            positionOffset = b->mLocation->mPosition.value();
+        }
 
-        glm::dvec3 vecToObserver = object->getObserverRelativePosition(positionOffset);
+        auto object = getObjectForBookmark(*b);
 
-        if (glm::length(vecToObserver) < 1.0) {
-          // go to next checkpoint
-          logger().info("{}: Passed Checkpoint",
-              mPluginSettings->mCheckpoints[mCurrentCheckpointIdx].mBookmarkName);
-          nextCheckpoint();
+        if (object) {
+          glm::dvec3 vecToObserver = object->getObserverRelativePosition(positionOffset);
+
+          if (glm::length(vecToObserver) < 1.0) {
+            logger().info("{}: Passed Checkpoint", checkpoint.mBookmarkName);
+            nextCheckpoint();
+          }
         }
       }
     }
@@ -453,67 +461,93 @@ void Plugin::update() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void Plugin::showCheckpoint(std::size_t index) {
+void Plugin::prepareCheckpoint(std::size_t index) {
   if (index >= mPluginSettings->mCheckpoints.size()) {
     return;
   }
 
+  // Get the settings and view for the new checkpoint.
   auto const& settings = mPluginSettings->mCheckpoints[index];
+  auto&       view     = mCheckpointViews[(index) % mCheckpointViews.size()];
 
-  // Fetch checkpoint at Index
-  auto& view = mCheckpointViews[(index) % mCheckpointViews.size()];
+  // Update the checkpoint's webview according to the checkpoint data.
+  switch (settings.mType) {
+  case Settings::Checkpoint::Type::eSimple: {
+    view.mGuiItem->callJavascript("reset");
+    break;
+  }
+  case Settings::Checkpoint::Type::eRequestFMS: {
+    view.mGuiItem->callJavascript("setFMS");
+    break;
+  }
+  case Settings::Checkpoint::Type::eRequestCOG: {
+    view.mGuiItem->callJavascript("setCOG");
+    break;
+  }
+  case Settings::Checkpoint::Type::eMessage: {
+    view.mGuiItem->callJavascript("setMSG", settings.mData.value_or(""));
+    break;
+  }
+  case Settings::Checkpoint::Type::eSwitchScenario: {
+    std::string html = "";
+    for (Plugin::Settings::Scenario& scenario : mPluginSettings->mOtherScenarios) {
+      html += "<input class=\"btn\" type=\"button\" value=\"" + scenario.mName +
+              "\" onclick=\"window.callNative('loadScenario', '" + scenario.mPath + "')\">\n";
+    }
+    view.mGuiItem->callJavascript("setCHS", html);
+    break;
+  }
+  }
+}
 
-  // Fetch bookmark for position
-  std::optional<cs::core::Settings::Bookmark> bookmark = getBookmarkByName(settings.mBookmarkName);
-  if (bookmark.has_value()) {
-    cs::core::Settings::Bookmark b = bookmark.value();
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // Set webview according to type
-    switch (settings.mType) {
-    case Settings::Checkpoint::Type::eSimple: {
-      view.mGuiItem->callJavascript("reset");
-      break;
+void Plugin::updateCheckpointVisibility() {
+
+  for (size_t i = 0; i < mCheckpointViews.size(); i++) {
+    auto const& view = mCheckpointViews[(mCurrentCheckpointIdx + i) % mCheckpointViews.size()];
+
+    // All checkpoint views will get the CSS classes checkpoint0, checkpoint1, checkpoint2, and so
+    // on. The current checkpoint will receive checkpoint0 which will make it fully visible. The
+    // farther a checkpoint is in the future, the larger its number will be. This is used to make
+    // the gradually more transparent. All views which do not show a checkpoint currently are set to
+    // be hidden.
+    if (mCurrentCheckpointIdx + i < mPluginSettings->mCheckpoints.size()) {
+      view.mGuiItem->callJavascript("setBodyClass", "checkpoint" + std::to_string(i));
+    } else {
+      view.mGuiItem->callJavascript("setBodyClass", "hidden");
     }
-    case Settings::Checkpoint::Type::eRequestFMS: {
-      view.mGuiItem->callJavascript("setFMS");
-      break;
-    }
-    case Settings::Checkpoint::Type::eRequestCOG: {
-      view.mGuiItem->callJavascript("setCOG");
-      break;
-    }
-    case Settings::Checkpoint::Type::eMessage: {
-      view.mGuiItem->callJavascript("setMSG", settings.mData.value_or(""));
-      break;
-    }
-    case Settings::Checkpoint::Type::eSwitchScenario: {
-      std::string html = "";
-      for (Plugin::Settings::Scenario& scenario : mPluginSettings->mOtherScenarios) {
-        html += "<input class=\"btn\" type=\"button\" value=\"" + scenario.mName +
-                "\" onclick=\"window.callNative('loadScenario', '" + scenario.mPath + "')\">\n";
-      }
-      view.mGuiItem->callJavascript("setCHS", html);
-      break;
-    }
-    }
+
+    // Make only current checkpoint interactive.
+    view.mGuiItem->setIsInteractive(i == 0);
+
+    // Ensure that the checkpoints are drawn back-to-front.
+    std::size_t sortKey = static_cast<std::size_t>(cs::utils::DrawOrder::eTransparentItems) +
+                          mCheckpointViews.size() - i;
+    VistaOpenSGMaterialTools::SetSortKeyOnSubtree(view.mGuiNode.get(), static_cast<int>(sortKey));
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Plugin::teleportToCurrent() {
+
+  // We actually teleport to the checkpoint before the current index so that we can see the current
+  // checkpoint.
   size_t index = std::max(0, static_cast<int>(mCurrentCheckpointIdx) - 1);
 
   if (index >= mPluginSettings->mCheckpoints.size()) {
     return;
   }
 
+  // Retrieve the bookmark for the target checkpoint.
   auto const& settings = mPluginSettings->mCheckpoints[index];
   auto        bookmark = getBookmarkByName(settings.mBookmarkName);
 
   if (bookmark.has_value()) {
     cs::core::Settings::Bookmark b = bookmark.value();
 
+    // Move the observer to the bookmark's position.
     if (b.mLocation) {
       auto loc = b.mLocation.value();
 
@@ -543,9 +577,10 @@ void Plugin::nextCheckpoint() {
   // Setup the checkpoint which becomes visible next.
   std::size_t newlyVisibleIdx = mCurrentCheckpointIdx + mCheckpointViews.size() - 1;
   if (newlyVisibleIdx < mPluginSettings->mCheckpoints.size()) {
-    showCheckpoint(newlyVisibleIdx);
+    prepareCheckpoint(newlyVisibleIdx);
   }
 
+  // Update the visiblity of all checkpoints.
   updateCheckpointVisibility();
 }
 
@@ -556,61 +591,39 @@ void Plugin::previousCheckpoint() {
     return;
   }
 
-  // Advance the current checkpoint index.
+  // Reduce the current checkpoint index.
   mCurrentCheckpointIdx = std::max(static_cast<int>(mCurrentCheckpointIdx) - 1, 0);
 
-  // Setup the checkpoint which becomes visible next.
-  std::size_t newlyVisibleIdx = mCurrentCheckpointIdx;
-  if (newlyVisibleIdx < mPluginSettings->mCheckpoints.size()) {
-    showCheckpoint(newlyVisibleIdx);
+  // Make the corresponding CheckpointView show the new current checkpoint.
+  if (mCurrentCheckpointIdx < mPluginSettings->mCheckpoints.size()) {
+    prepareCheckpoint(mCurrentCheckpointIdx);
   }
 
+  // Update the visiblity of all checkpoints.
   updateCheckpointVisibility();
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void Plugin::updateCheckpointVisibility() {
-  // Set css classes of all visible checkpoints. The item at i==0 is the current checkpoint, and
-  // i==mCheckpointViews.size()-1 is the most distant checkpoint.
-  for (std::size_t i = 0; i < mCheckpointViews.size(); i++) {
-    auto index = (mCurrentCheckpointIdx + i) % mCheckpointViews.size();
-    if (mCurrentCheckpointIdx + i < mPluginSettings->mCheckpoints.size()) {
-      mCheckpointViews[index].mGuiItem->callJavascript(
-          "setBodyClass", "checkpoint" + std::to_string(i));
-    } else {
-      mCheckpointViews[index].mGuiItem->callJavascript("setBodyClass", "hidden");
-    }
-
-    // Make only current checkpoint interactive.
-    mCheckpointViews[index].mGuiItem->setIsInteractive(i == 0);
-
-    // Ensure that the checkpoints are drawn back-to-front.
-    std::size_t sortKey = static_cast<std::size_t>(cs::utils::DrawOrder::eTransparentItems) +
-                          mCheckpointViews.size() - i;
-    VistaOpenSGMaterialTools::SetSortKeyOnSubtree(
-        mCheckpointViews[index].mGuiNode.get(), static_cast<int>(sortKey));
-  }
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-std::optional<cs::core::Settings::Bookmark> Plugin::getBookmarkByName(std::string name) {
-  cs::core::Settings::Bookmark bookmark;
-  for (auto it = mGuiManager->getBookmarks().begin(); it != mGuiManager->getBookmarks().end();
-       ++it) {
-    if (it->second.mName == name) {
-      return it->second;
+std::optional<cs::core::Settings::Bookmark> Plugin::getBookmarkByName(
+    std::string const& name) const {
+
+  for (auto const& [id, bookmark] : mGuiManager->getBookmarks()) {
+    if (bookmark.mName == name) {
+      return bookmark;
     }
   }
+
   logger().error("No bookmark with the name \"" + name + "\" could be found!");
+
   return std::nullopt;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::shared_ptr<const cs::scene::CelestialObject> Plugin::getObjectForBookmark(
-    cs::core::Settings::Bookmark const& bookmark) {
+    cs::core::Settings::Bookmark const& bookmark) const {
+
   for (auto const& [name, object] : mAllSettings->mObjects) {
     if (object->getCenterName() == bookmark.mLocation->mCenter &&
         object->getFrameName() == bookmark.mLocation->mFrame) {
